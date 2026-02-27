@@ -13,8 +13,9 @@ Tools:
   - sdlc_get_tech_preferences: Fetch tech stack choices
 """
 
+import argparse
 import json
-import sys
+import os
 from typing import Any
 
 from dotenv import load_dotenv
@@ -32,14 +33,20 @@ from sdlc_assist_mcp.models.inputs import (
 from sdlc_assist_mcp.supabase_client import SupabaseClient, create_client_from_env
 
 # ---------------------------------------------------------------------------
-# Load .env (for local development — Claude Desktop, Claude Code, etc.)
+# Load .env (for local development)
 # ---------------------------------------------------------------------------
 load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Initialize MCP server
+# host 0.0.0.0 is required for Cloud Run; ignored when using stdio
+# PORT env var is set by Cloud Run; defaults to 8080
 # ---------------------------------------------------------------------------
-mcp = FastMCP("sdlc_assist_mcp")
+mcp = FastMCP(
+    "sdlc_assist_mcp",
+    host="0.0.0.0",
+    port=int(os.environ.get("PORT", 8080)),
+)
 
 # ---------------------------------------------------------------------------
 # Supabase client (created lazily on first tool call)
@@ -48,7 +55,6 @@ _db: SupabaseClient | None = None
 
 
 def _get_db() -> SupabaseClient:
-    """Lazy-initialize the Supabase client."""
     global _db
     if _db is None:
         _db = create_client_from_env()
@@ -59,23 +65,16 @@ def _get_db() -> SupabaseClient:
 # Shared helpers
 # ---------------------------------------------------------------------------
 def _handle_error(e: Exception) -> str:
-    """Return a consistent, actionable error message."""
     if hasattr(e, "response"):
         status = getattr(e.response, "status_code", "unknown")
         if status == 404:
             return "Error: Resource not found. Check that the project_id is correct."
         if status == 401:
-            return (
-                "Error: Authentication failed. "
-                "Check your SUPABASE_SERVICE_ROLE_KEY."
-            )
+            return "Error: Authentication failed. Check your SUPABASE_SERVICE_ROLE_KEY."
         return f"Error: Supabase API returned status {status}."
     return f"Error: {type(e).__name__}: {e}"
 
 
-# ---------------------------------------------------------------------------
-# ARTIFACT metadata for human-friendly labels
-# ---------------------------------------------------------------------------
 ARTIFACT_LABELS: dict[str, str] = {
     "prd_content": "PRD",
     "design_system_content": "Design System",
@@ -120,7 +119,6 @@ async def sdlc_list_projects(params: ListProjectsInput) -> str:
     try:
         db = _get_db()
 
-        # Select key columns + artifact presence indicators
         select = (
             "id,name,status,created_at,updated_at,"
             "prd_content,design_system_content,arch_overview_content,"
@@ -143,11 +141,9 @@ async def sdlc_list_projects(params: ListProjectsInput) -> str:
         if not rows:
             return "No projects found."
 
-        # Build markdown output
         lines = [f"# SDLC Assist Projects ({len(rows)} total)", ""]
 
         for proj in rows:
-            # Count completed artifacts
             artifact_cols = [
                 "prd_content",
                 "design_system_content",
@@ -217,21 +213,18 @@ async def sdlc_get_project_summary(params: GetProjectSummaryInput) -> str:
                 "Use sdlc_list_projects to see available project IDs."
             )
 
-        # Count screens
         screens = await db.query(
             "project_screens",
             select="id",
             filters={"project_id": f"eq.{params.project_id}"},
         )
 
-        # Count uploaded files
         files = await db.query(
             "project_files",
             select="id,original_filename",
             filters={"project_id": f"eq.{params.project_id}"},
         )
 
-        # Build summary
         lines = [f"# Project: {proj['name']}", ""]
         lines.append(f"- **ID:** `{proj['id']}`")
         lines.append(f"- **Status:** {proj['status']}")
@@ -239,7 +232,6 @@ async def sdlc_get_project_summary(params: GetProjectSummaryInput) -> str:
         lines.append(f"- **Updated:** {proj['updated_at']}")
         lines.append("")
 
-        # Tech preferences
         if proj.get("tech_preferences"):
             tp = proj["tech_preferences"]
             if isinstance(tp, str):
@@ -249,7 +241,6 @@ async def sdlc_get_project_summary(params: GetProjectSummaryInput) -> str:
                 lines.append(f"- **{key}:** {value}")
             lines.append("")
 
-        # Artifact status
         lines.append("## Artifact Status")
         lines.append("")
         lines.append("| Artifact | Status | Generated At |")
@@ -261,16 +252,8 @@ async def sdlc_get_project_summary(params: GetProjectSummaryInput) -> str:
             ("Architecture", "arch_overview_content", "arch_overview_generated_at"),
             ("Data Model", "data_model_content", "data_model_generated_at"),
             ("API Contract", "api_contract_content", "api_contract_generated_at"),
-            (
-                "Sequence Diagrams",
-                "sequence_diagrams_content",
-                "sequence_diagrams_generated_at",
-            ),
-            (
-                "Implementation Plan",
-                "implementation_plan_content",
-                "implementation_plan_generated_at",
-            ),
+            ("Sequence Diagrams", "sequence_diagrams_content", "sequence_diagrams_generated_at"),
+            ("Implementation Plan", "implementation_plan_content", "implementation_plan_generated_at"),
             ("CLAUDE.md", "claude_md_content", None),
             ("Corporate Guidelines", "corporate_guidelines_content", None),
         ]
@@ -357,7 +340,6 @@ async def sdlc_get_artifact(params: GetArtifactInput) -> str:
                 "SDLC Assist application first."
             )
 
-        # For JSON artifacts, try to pretty-print
         if params.artifact_type in (
             ArtifactType.DESIGN_SYSTEM,
             ArtifactType.IMPLEMENTATION_PLAN,
@@ -408,7 +390,6 @@ async def sdlc_get_screens(params: GetScreensInput) -> str:
     try:
         db = _get_db()
 
-        # Verify project exists
         proj = await db.query_single(
             "projects",
             select="id,name",
@@ -421,7 +402,6 @@ async def sdlc_get_screens(params: GetScreensInput) -> str:
                 "Use sdlc_list_projects to see available project IDs."
             )
 
-        # Build select columns
         select_cols = (
             "id,name,description,screen_type,epic_name,"
             "complexity,user_role,notes,display_order,"
@@ -443,7 +423,6 @@ async def sdlc_get_screens(params: GetScreensInput) -> str:
                 "Screens are generated during the UX Design phase."
             )
 
-        # Group by epic
         epics: dict[str, list[dict]] = {}
         for screen in screens:
             epic = screen.get("epic_name") or "Ungrouped"
@@ -547,7 +526,6 @@ async def sdlc_get_tech_preferences(params: GetTechPreferencesInput) -> str:
             lines.append("")
 
         for key, value in tp.items():
-            # Make keys more readable
             display_key = key.replace("_", " ").replace("-", " ").title()
             lines.append(f"- **{display_key}:** {value}")
 
@@ -561,8 +539,22 @@ async def sdlc_get_tech_preferences(params: GetTechPreferencesInput) -> str:
 # Entry point
 # ===========================================================================
 def main() -> None:
-    """Run the MCP server using stdio transport."""
-    mcp.run(transport="stdio")
+    """Run the MCP server.
+
+    Supports two transports:
+      --transport stdio             (default, for Claude Desktop / Claude Code)
+      --transport streamable-http   (for Cloud Run / remote deployment)
+    """
+    parser = argparse.ArgumentParser(description="SDLC Assist MCP Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="Transport to use (default: stdio)",
+    )
+    args = parser.parse_args()
+
+    mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":

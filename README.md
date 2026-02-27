@@ -61,7 +61,7 @@ MCP is just a protocol — a standardized way for AI to call functions. This ser
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/sdlc-assist-mcp.git
+git clone https://github.com/ramseychad1/sdlc-assist-mcp.git
 cd sdlc-assist-mcp
 
 # Using uv (recommended)

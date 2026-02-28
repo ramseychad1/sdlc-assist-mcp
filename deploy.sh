@@ -16,6 +16,11 @@ REGION="us-central1"                     # Match your Vertex AI agents region
 SERVICE_NAME="sdlc-assist-mcp"
 REPO_NAME="sdlc-assist"                 # Artifact Registry repo name
 
+# Vertex AI IT Estimation Agent resource name
+# Find with: curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+#   "https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines"
+IT_ESTIMATION_AGENT="projects/127687886386/locations/${REGION}/reasoningEngines/3458653463146135552"
+
 # Supabase credentials (these get set as Cloud Run secrets)
 # You'll be prompted to enter these during deployment
 # DO NOT hardcode them here
@@ -135,6 +140,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --platform=managed \
     --no-allow-unauthenticated \
     --set-secrets="SUPABASE_URL=supabase-url:latest,SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest" \
+    --set-env-vars="IT_ESTIMATION_AGENT_RESOURCE=${IT_ESTIMATION_AGENT}" \
     --port=8080 \
     --memory=512Mi \
     --min-instances=0 \

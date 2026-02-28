@@ -68,11 +68,22 @@ async def run_agent(resource_name: str, message: str) -> str:
     agent = _get_agent(resource_name)
 
     def _sync_call() -> str:
-        session = agent.create_session()
-        response = agent.send_message(
-            session_id=session.session_id,
+        # create_session returns a dict with session info
+        session = agent.create_session(user_id="mcp-server")
+        session_id = (
+            session.get("id") or session.get("session_id")
+            if isinstance(session, dict)
+            else getattr(session, "session_id", str(session))
+        )
+
+        # Use the agent's query method to send a message
+        # (maps to the streamQuery / send_message REST endpoint)
+        response = agent.query(
+            user_id="mcp-server",
+            session_id=session_id,
             message=message,
         )
+
         # Handle different response shapes from the SDK
         if hasattr(response, "text"):
             return response.text

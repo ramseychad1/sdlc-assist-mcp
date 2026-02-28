@@ -30,6 +30,7 @@ from sdlc_assist_mcp.models.inputs import (
     GetScreensInput,
     GetTechPreferencesInput,
     ListProjectsInput,
+    GenerateEstimationInput,
 )
 from sdlc_assist_mcp.supabase_client import SupabaseClient, create_client_from_env
 from sdlc_assist_mcp.vertex_client import run_agent
@@ -550,7 +551,8 @@ async def sdlc_get_tech_preferences(params: GetTechPreferencesInput) -> str:
         "openWorldHint": True,
     },
 )
-async def sdlc_generate_estimation(project_id: str) -> str:
+#async def sdlc_generate_estimation(project_id: str) -> str:
+async def sdlc_generate_estimation(params: GenerateEstimationInput) -> str:
     """Generate Traditional vs AI-Assisted cost estimates for a project.
 
     Produces two side-by-side estimates showing hours and costs for each
@@ -574,10 +576,10 @@ async def sdlc_generate_estimation(project_id: str) -> str:
         # -- 1. Fetch project --
         proj = await db.query_single(
             "projects",
-            filters={"id": f"eq.{project_id}"},
+            filters={"id": f"eq.{params.project_id}"},
         )
         if not proj:
-            return json.dumps({"error": f"No project found with ID {project_id}"})
+            return json.dumps({"error": f"No project found with ID {params.project_id}"})
 
         # -- 2. Check required artifacts exist --
         required_artifacts = [
@@ -594,7 +596,7 @@ async def sdlc_generate_estimation(project_id: str) -> str:
         ]
         if missing:
             return json.dumps({
-                "error": "Missing required artifacts. Generate these first: "
+                "error": "Missing required artifacts. Generate these first: "   
                 + ", ".join(missing)
             })
 
@@ -602,7 +604,7 @@ async def sdlc_generate_estimation(project_id: str) -> str:
         screens = await db.query(
             "project_screens",
             select="id,name,description,screen_type,epic_name,complexity,user_role,notes",
-            filters={"project_id": f"eq.{project_id}"},
+            filters={"project_id": f"eq.{params.project_id}"},
             order="display_order.asc.nullsfirst",
         )
 

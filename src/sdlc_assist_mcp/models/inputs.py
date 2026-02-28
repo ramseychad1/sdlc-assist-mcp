@@ -123,3 +123,18 @@ class GetTechPreferencesInput(BaseModel):
         ),
         min_length=1,
     )
+
+class GenerateEstimationInput(BaseModel):
+    """Input for generating IT cost estimates."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    project_id: str = Field(
+        ...,
+        description=(
+            "UUID of the project to estimate. "
+            "Requires all upstream artifacts (PRD, architecture, data model, "
+            "API contract, implementation plan) to be generated first."
+        ),
+        min_length=1,
+    )

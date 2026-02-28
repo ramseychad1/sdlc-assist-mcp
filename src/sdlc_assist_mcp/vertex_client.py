@@ -1,12 +1,11 @@
-"""Client for calling Vertex AI Agent Engine agents via REST API.
+"""Client for calling Vertex AI Gemini directly via REST API.
 
-Uses the same pattern as the Java backend: async_create_session → streamQuery → parse.
-Avoids SDK wrapper issues by calling the REST API directly with httpx.
+Calls the Vertex AI generateContent endpoint using service account credentials.
+No Agent Engine dependency — just a direct Gemini call with a system prompt.
 """
 
 import json
 import os
-import uuid
 
 import google.auth
 import google.auth.transport.requests
@@ -14,6 +13,8 @@ import httpx
 
 
 _credentials = None
+
+GEMINI_MODEL = "gemini-2.0-flash"
 
 
 def _get_access_token() -> str:
@@ -27,122 +28,63 @@ def _get_access_token() -> str:
     return _credentials.token
 
 
-async def run_agent(resource_name: str, message: str) -> str:
-    """Send a message to a Vertex AI agent and return the response text.
+async def call_gemini(system_prompt: str, user_message: str) -> str:
+    """Call Vertex AI Gemini and return the text response.
 
-    Uses the REST API directly: async_create_session → streamQuery → parse.
+    Uses the Vertex AI REST API with service account auth (no API key needed).
 
     Args:
-        resource_name: The reasoning engine resource ID (numeric) or full resource path.
-        message: The full context message to send to the agent.
+        system_prompt: Instructions for the model.
+        user_message: The user content (project context + request).
 
     Returns:
-        The agent's text response.
+        The model's text response.
     """
-    # Support both full resource path and bare resource ID
-    # Use VERTEXAI_PROJECT_ID (project name like "sdlc-assist") for the API path,
-    # NOT GOOGLE_CLOUD_PROJECT which may be the numeric ID and cause 404s.
-    vertexai_project = os.environ.get("VERTEXAI_PROJECT_ID", "sdlc-assist")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", os.environ.get("VERTEXAI_LOCATION", "us-central1"))
+    project = os.environ.get("VERTEXAI_PROJECT_ID", "sdlc-assist")
+    location = os.environ.get(
+        "GOOGLE_CLOUD_LOCATION",
+        os.environ.get("VERTEXAI_LOCATION", "us-central1"),
+    )
 
-    if "/" in resource_name:
-        engine_path = resource_name
-    else:
-        engine_path = f"projects/{vertexai_project}/locations/{location}/reasoningEngines/{resource_name}"
+    endpoint = (
+        f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
+        f"/locations/{location}/publishers/google/models/{GEMINI_MODEL}:generateContent"
+    )
 
     token = _get_access_token()
-    user_id = str(uuid.uuid4())
-    api_host = f"https://{location}-aiplatform.googleapis.com"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
+
+    body = {
+        "contents": [
+            {"role": "user", "parts": [{"text": user_message}]},
+        ],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 8192,
+            "responseMimeType": "application/json",
+        },
     }
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-        # 1. Create session — try v1 first (most agents), fall back to v1beta1
-        session_resp = None
-        for api_version in ("v1", "v1beta1"):
-            session_url = f"{api_host}/{api_version}/{engine_path}:async_create_session"
-            session_resp = await client.post(
-                session_url, headers=headers, json={"user_id": user_id},
-            )
-            if session_resp.status_code == 200:
-                break
-            if session_resp.status_code != 404:
-                raise RuntimeError(
-                    f"async_create_session failed ({session_resp.status_code}): {session_resp.text}"
-                )
-
-        if session_resp is None or session_resp.status_code != 200:
-            raise RuntimeError(
-                f"async_create_session failed on both v1 and v1beta1 ({session_resp.status_code}): {session_resp.text}"
-            )
-
-        working_version = "v1" if "v1/" in str(session_resp.url) else "v1beta1"
-        session_data = session_resp.json()
-        session_id = session_data.get("id") or session_data.get("session_id") or session_data.get("name", "")
-
-        # 2. Stream query — use same API version that worked for session creation
-        query_url = f"{api_host}/{working_version}/{engine_path}:streamQuery"
-        query_resp = await client.post(
-            query_url,
-            headers=headers,
-            json={
-                "user_id": user_id,
-                "session_id": session_id,
-                "message": message,
+        resp = await client.post(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
             },
+            json=body,
         )
 
-        if query_resp.status_code != 200:
+        if resp.status_code != 200:
             raise RuntimeError(
-                f"streamQuery failed ({query_resp.status_code}): {query_resp.text}"
+                f"Gemini API failed ({resp.status_code}): {resp.text[:500]}"
             )
 
-        # 3. Parse chunked response — collect all text from the streamed JSON chunks
-        return _parse_stream_response(query_resp.text)
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Gemini returned no candidates")
 
-
-def _parse_stream_response(raw: str) -> str:
-    """Parse the streamQuery response, extracting agent text from JSON chunks.
-
-    The response may be a JSON array of chunks or a single JSON object.
-    Each chunk may contain content.parts[].text or just text fields.
-    """
-    text_parts = []
-
-    # Try parsing as a JSON array first (common for streaming responses)
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            for chunk in data:
-                _extract_text(chunk, text_parts)
-        elif isinstance(data, dict):
-            _extract_text(data, text_parts)
-        else:
-            return str(data)
-    except json.JSONDecodeError:
-        # If not valid JSON, return raw text
-        return raw.strip()
-
-    return "".join(text_parts) if text_parts else raw.strip()
-
-
-def _extract_text(chunk: dict, parts: list[str]) -> None:
-    """Extract text content from a streamQuery response chunk."""
-    # Pattern: {"content": {"parts": [{"text": "..."}]}}
-    content = chunk.get("content", {})
-    if isinstance(content, dict):
-        for part in content.get("parts", []):
-            if isinstance(part, dict) and "text" in part:
-                parts.append(part["text"])
-
-    # Pattern: {"text": "..."}
-    if "text" in chunk and not parts:
-        parts.append(chunk["text"])
-
-    # Pattern: {"response": "..."} or {"output": "..."}
-    for key in ("response", "output"):
-        if key in chunk and not parts:
-            val = chunk[key]
-            parts.append(val if isinstance(val, str) else json.dumps(val))
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text_parts = [p["text"] for p in parts if "text" in p]
+        return "".join(text_parts)

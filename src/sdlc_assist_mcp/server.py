@@ -33,7 +33,7 @@ from sdlc_assist_mcp.models.inputs import (
     GenerateEstimationInput,
 )
 from sdlc_assist_mcp.supabase_client import SupabaseClient, create_client_from_env
-from sdlc_assist_mcp.vertex_client import run_agent
+from sdlc_assist_mcp.vertex_client import call_gemini
 
 # ---------------------------------------------------------------------------
 # Load .env (for local development)
@@ -655,16 +655,46 @@ async def sdlc_generate_estimation(params: GenerateEstimationInput) -> str:
 
         context_message = "\n\n---\n\n".join(context_parts)
 
-        # -- 5. Call the Vertex AI estimation agent --
-        agent_resource = os.environ.get("IT_ESTIMATION_AGENT_RESOURCE")
-        if not agent_resource:
-            return json.dumps({
-                "error": "IT_ESTIMATION_AGENT_RESOURCE environment variable "
-                "is not set. Deploy the IT estimation agent to Vertex AI "
-                "and set this variable to its resource name."
-            })
+        # -- 5. Call Gemini directly for estimation --
+        system_prompt = (
+            "You are an IT project estimation expert. Analyze the provided project "
+            "artifacts and produce a detailed cost/effort estimation.\n\n"
+            "Return a JSON object with this structure:\n"
+            "{\n"
+            '  "projectName": "string",\n'
+            '  "traditionalEstimate": {\n'
+            '    "phases": [\n'
+            '      {"name": "Requirements", "hours": number, "cost": number},\n'
+            '      {"name": "Design", "hours": number, "cost": number},\n'
+            '      {"name": "Development", "hours": number, "cost": number},\n'
+            '      {"name": "Testing", "hours": number, "cost": number},\n'
+            '      {"name": "Deployment", "hours": number, "cost": number},\n'
+            '      {"name": "Data Cleansing", "hours": number, "cost": number},\n'
+            '      {"name": "Transition to Run", "hours": number, "cost": number},\n'
+            '      {"name": "Project Management", "hours": number, "cost": number}\n'
+            "    ],\n"
+            '    "totalHours": number,\n'
+            '    "totalCost": number\n'
+            "  },\n"
+            '  "aiAssistedEstimate": {\n'
+            '    "phases": [same structure as above with reduced hours/cost],\n'
+            '    "totalHours": number,\n'
+            '    "totalCost": number\n'
+            "  },\n"
+            '  "savings": {\n'
+            '    "hoursSaved": number,\n'
+            '    "costSaved": number,\n'
+            '    "percentageReduction": number\n'
+            "  },\n"
+            '  "assumptions": ["string array of key assumptions"]\n'
+            "}\n\n"
+            "Base costs on a blended rate of $150/hour. "
+            "AI-assisted estimates should reflect realistic reductions from using "
+            "AI code generation, automated testing, and SDLC-Assist artifacts. "
+            "Consider project complexity from the artifacts provided."
+        )
 
-        result = await run_agent(agent_resource, context_message)
+        result = await call_gemini(system_prompt, context_message)
 
         # -- 6. Validate JSON response --
         try:

@@ -11,6 +11,7 @@ Tools:
   - sdlc_get_artifact: Fetch any artifact (PRD, data model, etc.)
   - sdlc_get_screens: List UI screens for a project
   - sdlc_get_tech_preferences: Fetch tech stack choices
+  - sdlc_generate_estimation: Generate Traditional vs AI-Assisted cost estimates
 """
 
 import argparse
@@ -31,6 +32,7 @@ from sdlc_assist_mcp.models.inputs import (
     ListProjectsInput,
 )
 from sdlc_assist_mcp.supabase_client import SupabaseClient, create_client_from_env
+from sdlc_assist_mcp.vertex_client import run_agent
 
 # ---------------------------------------------------------------------------
 # Load .env (for local development)
@@ -533,6 +535,149 @@ async def sdlc_get_tech_preferences(params: GetTechPreferencesInput) -> str:
 
     except Exception as e:
         return _handle_error(e)
+
+
+# ===========================================================================
+# Tool 6: Generate IT Estimation
+# ===========================================================================
+@mcp.tool(
+    name="sdlc_generate_estimation",
+    annotations={
+        "title": "Generate IT Cost Estimation",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def sdlc_generate_estimation(project_id: str) -> str:
+    """Generate Traditional vs AI-Assisted cost estimates for a project.
+
+    Produces two side-by-side estimates showing hours and costs for each
+    SDLC phase (Requirements, Design, Develop, Test, Deploy, Data Cleansing,
+    Transition to Run, Project Management), then highlights the savings
+    from using SDLC-Assist + agentic development.
+
+    Requires all upstream artifacts to be generated first (PRD, architecture,
+    data model, API contract, screens, implementation plan).
+
+    Args:
+        project_id: The project UUID.
+
+    Returns:
+        str: JSON with traditionalEstimate, aiAssistedEstimate, savings,
+             and assumptions.
+    """
+    try:
+        db = _get_db()
+
+        # -- 1. Fetch project --
+        proj = await db.query_single(
+            "projects",
+            filters={"id": f"eq.{project_id}"},
+        )
+        if not proj:
+            return json.dumps({"error": f"No project found with ID {project_id}"})
+
+        # -- 2. Check required artifacts exist --
+        required_artifacts = [
+            ("prd_content", "PRD"),
+            ("arch_overview_content", "Architecture Overview"),
+            ("data_model_content", "Data Model"),
+            ("api_contract_content", "API Contract"),
+            ("implementation_plan_content", "Implementation Plan"),
+        ]
+        missing = [
+            label
+            for col, label in required_artifacts
+            if proj.get(col) is None
+        ]
+        if missing:
+            return json.dumps({
+                "error": "Missing required artifacts. Generate these first: "
+                + ", ".join(missing)
+            })
+
+        # -- 3. Fetch screens --
+        screens = await db.query(
+            "project_screens",
+            select="id,name,description,screen_type,epic_name,complexity,user_role,notes",
+            filters={"project_id": f"eq.{project_id}"},
+            order="display_order.asc.nullsfirst",
+        )
+
+        # -- 4. Build context message for the estimation agent --
+        context_parts = []
+
+        context_parts.append(
+            f"## PROJECT NAME\n{proj.get('name', 'Unknown Project')}"
+        )
+
+        if proj.get("tech_preferences"):
+            tp = proj["tech_preferences"]
+            if isinstance(tp, str):
+                tp = json.loads(tp)
+            context_parts.append(
+                f"## TECHNOLOGY STACK\n{json.dumps(tp, indent=2)}"
+            )
+
+        context_parts.append(
+            f"## PRODUCT REQUIREMENTS DOCUMENT\n{proj['prd_content']}"
+        )
+
+        if screens:
+            context_parts.append(
+                f"## CONFIRMED UI SCREENS\n{json.dumps(screens, indent=2)}"
+            )
+
+        context_parts.append(
+            f"## ARCHITECTURE OVERVIEW\n{proj['arch_overview_content']}"
+        )
+
+        context_parts.append(
+            f"## DATA MODEL\n{proj['data_model_content']}"
+        )
+
+        context_parts.append(
+            f"## API CONTRACT\n{proj['api_contract_content']}"
+        )
+
+        if proj.get("sequence_diagrams_content"):
+            context_parts.append(
+                f"## SEQUENCE DIAGRAMS\n{proj['sequence_diagrams_content']}"
+            )
+
+        context_parts.append(
+            f"## IMPLEMENTATION PLAN\n{proj['implementation_plan_content']}"
+        )
+
+        context_message = "\n\n---\n\n".join(context_parts)
+
+        # -- 5. Call the Vertex AI estimation agent --
+        agent_resource = os.environ.get("IT_ESTIMATION_AGENT_RESOURCE")
+        if not agent_resource:
+            return json.dumps({
+                "error": "IT_ESTIMATION_AGENT_RESOURCE environment variable "
+                "is not set. Deploy the IT estimation agent to Vertex AI "
+                "and set this variable to its resource name."
+            })
+
+        result = await run_agent(agent_resource, context_message)
+
+        # -- 6. Validate JSON response --
+        try:
+            parsed = json.loads(result)
+            return json.dumps(parsed)
+        except json.JSONDecodeError:
+            return json.dumps({
+                "error": "Estimation agent returned invalid JSON",
+                "raw_response": result[:2000],
+            })
+
+    except Exception as e:
+        return json.dumps({
+            "error": f"Failed to generate estimation: {type(e).__name__}: {e}"
+        })
 
 
 # ===========================================================================

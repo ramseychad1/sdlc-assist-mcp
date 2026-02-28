@@ -657,41 +657,144 @@ async def sdlc_generate_estimation(params: GenerateEstimationInput) -> str:
 
         # -- 5. Call Gemini directly for estimation --
         system_prompt = (
-            "You are an IT project estimation expert. Analyze the provided project "
-            "artifacts and produce a detailed cost/effort estimation.\n\n"
-            "Return a JSON object with this structure:\n"
+            "CRITICAL: Return ONLY a valid JSON object. No preamble, no explanation, no Markdown, no code fences.\n"
+            "The very first character of your response must be { and the very last must be }.\n\n"
+
+            "You are a senior IT estimation specialist. You produce cost estimates for enterprise software projects.\n"
+            "FIXED RATE: $80/hour for ALL tasks. Never use any other rate.\n\n"
+
+            "## NON-NEGOTIABLE RULES\n"
+            "RULE 1: AI-Assisted Requirements hours = 0. Always. No exceptions.\n"
+            "RULE 2: AI-Assisted Design hours = 0. Always. No exceptions.\n"
+            "RULE 3: Rate = 80. Always. Cost = hours * 80. Always.\n"
+            "RULE 4: Every breakdown field must show the multiplication math, not just a total.\n"
+            "RULE 5: Do not round to convenient numbers. Use the formula outputs exactly.\n\n"
+
+            "## STEP 1: COUNT COMPLEXITY DRIVERS\n"
+            "Count these from the artifacts. Be precise.\n"
+            "- epicCount: Count Epics in the PRD\n"
+            "- storyCount: Count Stories in the PRD\n"
+            "- taskCount: Count Tasks in the PRD\n"
+            "- screenCount: Total confirmed UI screens\n"
+            "- complexScreens: screens with complexity = high\n"
+            "- mediumScreens: screens with complexity = medium\n"
+            "- simpleScreens: screens with complexity = low\n"
+            "- entityCount: Count entity definition tables in the Data Model\n"
+            "- endpointCount: Count API endpoints in the API Contract\n"
+            "- integrationCount: Count distinct external system integrations\n"
+            "- userRoleCount: Count distinct user roles\n\n"
+
+            "## STEP 2: TRADITIONAL ESTIMATE FORMULAS\n\n"
+
+            "Task 1 Requirements: (epicCount * 16) + (storyCount * 4) + (integrationCount * 8) + 40\n"
+            "Example: 4 epics * 16h + 13 stories * 4h + 4 integrations * 8h + 40h = 64 + 52 + 32 + 40 = 188h\n\n"
+
+            "Task 2 Design: (complexScreens * 16) + (mediumScreens * 8) + (simpleScreens * 4) + (epicCount * 24) + (entityCount * 8) + (integrationCount * 16) + 40\n"
+            "Example: 3*16 + 4*8 + 2*4 + 4*24 + 5*8 + 4*16 + 40 = 48+32+8+96+40+64+40 = 328h\n\n"
+
+            "Task 3 Develop: (complexScreens * 16) + (mediumScreens * 8) + (simpleScreens * 4) + (entityCount * 16) + (endpointCount * 8) + (integrationCount * 40) + (userRoleCount * 24) + 40\n"
+            "Example: 3*16 + 4*8 + 2*4 + 5*16 + 15*8 + 4*40 + 2*24 + 40 = 48+32+8+80+120+160+48+40 = 536h\n\n"
+
+            "Task 4 Test: (developHours * 0.30) + (developHours * 0.20) + (screenCount * 8) + (integrationCount * 16) + 24\n"
+            "Example: 536*0.30 + 536*0.20 + 9*8 + 4*16 + 24 = 161+107+72+64+24 = 428h\n\n"
+
+            "Task 5 Deploy: 40 + 24 + 16 + 24 + 16 + 16 = 136h (always fixed)\n\n"
+
+            "Task 6 Data Cleansing: If PRD mentions data migration: (entityCount * 16) + (dataSourceCount * 24) + 40. Otherwise: 0h\n\n"
+
+            "Task 7 Transition: (epicCount * 8) + 16 + 24 + 16\n"
+            "Example: 4*8 + 16 + 24 + 16 = 32+16+24+16 = 88h\n\n"
+
+            "Task 8 PM: sum(tasks 1-7) * 0.15\n\n"
+
+            "## STEP 3: AI-ASSISTED ESTIMATE FORMULAS\n\n"
+
+            "Task 1 Requirements: 0 hours (automated by SDLC-Assist)\n"
+            "Task 2 Design: 0 hours (automated by SDLC-Assist)\n\n"
+
+            "Task 3 AI Develop: (complexScreens * 4) + (mediumScreens * 2) + (simpleScreens * 1) + (entityCount * 4) + (endpointCount * 2) + (integrationCount * 16) + (userRoleCount * 8) + 8\n"
+            "Example: 3*4 + 4*2 + 2*1 + 5*4 + 15*2 + 4*16 + 2*8 + 8 = 12+8+2+20+30+64+16+8 = 160h\n\n"
+
+            "Task 4 AI Test: (aiDevelopHours * 0.30) + (screenCount * 4) + (integrationCount * 8) + 8\n"
+            "Example: 160*0.30 + 9*4 + 4*8 + 8 = 48+36+32+8 = 124h\n\n"
+
+            "Task 5 AI Deploy: traditionalDeployHours * 0.60\n"
+            "Example: 136 * 0.60 = 82h\n\n"
+
+            "Task 6 AI Data Cleansing: same as Traditional\n\n"
+
+            "Task 7 AI Transition: traditionalTransitionHours * 0.50\n"
+            "Example: 88 * 0.50 = 44h\n\n"
+
+            "Task 8 AI PM: sum(AI tasks 1-7) * 0.05\n\n"
+
+            "## STEP 4: SAVINGS\n"
+            "hoursSaved = traditionalTotal - aiTotal\n"
+            "costSaved = hoursSaved * 80\n"
+            "percentReduction = round((hoursSaved / traditionalTotal) * 100)\n\n"
+
+            "## STEP 5: JUDGMENT ADJUSTMENTS (after formulas)\n"
+            "- Regulated domain (healthcare, finance): +10-15% to Traditional Requirements and Test\n"
+            "- More than 3 integrations: +10% to Traditional Develop and Test\n"
+            "- 20+ screens: +10% to Traditional Design and Develop\n"
+            "- Simple CRUD: -10% Traditional Design and Develop\n"
+            "Document adjustments in assumptions.\n\n"
+
+            "## JSON SCHEMA\n"
             "{\n"
             '  "projectName": "string",\n'
+            '  "generatedAt": "ISO-8601 datetime",\n'
+            '  "rate": 80,\n'
+            '  "complexityDrivers": {\n'
+            '    "epicCount": 0, "storyCount": 0, "taskCount": 0,\n'
+            '    "screenCount": 0, "simpleScreens": 0, "mediumScreens": 0, "complexScreens": 0,\n'
+            '    "entityCount": 0, "endpointCount": 0, "integrationCount": 0, "userRoleCount": 0\n'
+            "  },\n"
             '  "traditionalEstimate": {\n'
-            '    "phases": [\n'
-            '      {"name": "Requirements", "hours": number, "cost": number},\n'
-            '      {"name": "Design", "hours": number, "cost": number},\n'
-            '      {"name": "Development", "hours": number, "cost": number},\n'
-            '      {"name": "Testing", "hours": number, "cost": number},\n'
-            '      {"name": "Deployment", "hours": number, "cost": number},\n'
-            '      {"name": "Data Cleansing", "hours": number, "cost": number},\n'
-            '      {"name": "Transition to Run", "hours": number, "cost": number},\n'
-            '      {"name": "Project Management", "hours": number, "cost": number}\n'
+            '    "label": "Traditional SDLC",\n'
+            '    "description": "Estimated cost using traditional software development without AI assistance.",\n'
+            '    "tasks": [\n'
+            '      {"id": 1, "name": "Requirements", "hours": 0, "cost": 0, "breakdown": "show math"},\n'
+            '      {"id": 2, "name": "Design", "hours": 0, "cost": 0, "breakdown": "show math"},\n'
+            '      {"id": 3, "name": "Develop", "hours": 0, "cost": 0, "breakdown": "show math"},\n'
+            '      {"id": 4, "name": "Test", "hours": 0, "cost": 0, "breakdown": "show math"},\n'
+            '      {"id": 5, "name": "Deploy", "hours": 0, "cost": 0, "breakdown": "40+24+16+24+16+16=136h"},\n'
+            '      {"id": 6, "name": "Data Cleansing and Conversion", "hours": 0, "cost": 0, "breakdown": "string"},\n'
+            '      {"id": 7, "name": "Transition to Run", "hours": 0, "cost": 0, "breakdown": "show math"},\n'
+            '      {"id": 8, "name": "Project Management", "hours": 0, "cost": 0, "breakdown": "15% of tasks 1-7"}\n'
             "    ],\n"
-            '    "totalHours": number,\n'
-            '    "totalCost": number\n'
+            '    "totalHours": 0, "totalCost": 0\n'
             "  },\n"
             '  "aiAssistedEstimate": {\n'
-            '    "phases": [same structure as above with reduced hours/cost],\n'
-            '    "totalHours": number,\n'
-            '    "totalCost": number\n'
+            '    "label": "AI-Assisted SDLC (SDLC-Assist + Agentic Development)",\n'
+            '    "description": "Estimated cost using SDLC-Assist for requirements/design plus agentic AI development.",\n'
+            '    "tasks": [\n'
+            '      {"id": 1, "name": "Requirements", "hours": 0, "cost": 0, "breakdown": "Automated by SDLC-Assist"},\n'
+            '      {"id": 2, "name": "Design", "hours": 0, "cost": 0, "breakdown": "Automated by SDLC-Assist"},\n'
+            '      {"id": 3, "name": "Develop", "hours": 0, "cost": 0, "breakdown": "show AI math"},\n'
+            '      {"id": 4, "name": "Test", "hours": 0, "cost": 0, "breakdown": "show AI math"},\n'
+            '      {"id": 5, "name": "Deploy", "hours": 0, "cost": 0, "breakdown": "60% of traditional"},\n'
+            '      {"id": 6, "name": "Data Cleansing and Conversion", "hours": 0, "cost": 0, "breakdown": "string"},\n'
+            '      {"id": 7, "name": "Transition to Run", "hours": 0, "cost": 0, "breakdown": "50% of traditional"},\n'
+            '      {"id": 8, "name": "Project Management", "hours": 0, "cost": 0, "breakdown": "5% of AI tasks 1-7"}\n'
+            "    ],\n"
+            '    "totalHours": 0, "totalCost": 0\n'
             "  },\n"
             '  "savings": {\n'
-            '    "hoursSaved": number,\n'
-            '    "costSaved": number,\n'
-            '    "percentageReduction": number\n'
+            '    "hoursSaved": 0, "costSaved": 0, "percentReduction": 0,\n'
+            '    "narrative": "3-5 sentences: name the project, call out Requirements and Design at zero hours, state savings % and $"\n'
             "  },\n"
-            '  "assumptions": ["string array of key assumptions"]\n'
+            '  "assumptions": ["each assumption or adjustment"]\n'
             "}\n\n"
-            "Base costs on a blended rate of $150/hour. "
-            "AI-assisted estimates should reflect realistic reductions from using "
-            "AI code generation, automated testing, and SDLC-Assist artifacts. "
-            "Consider project complexity from the artifacts provided."
+
+            "## VALIDATION BEFORE RESPONDING\n"
+            "- Is rate exactly 80? (cost = hours * 80)\n"
+            "- Are AI Requirements hours exactly 0?\n"
+            "- Are AI Design hours exactly 0?\n"
+            "- Does every breakdown show multiplication math?\n"
+            "- Does totalHours = sum of all task hours?\n"
+            "- Does totalCost = totalHours * 80?\n"
+            "- Does percentReduction = round((hoursSaved / traditionalTotal) * 100)?\n"
         )
 
         result = await call_gemini(system_prompt, context_message)
